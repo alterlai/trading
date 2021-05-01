@@ -10,9 +10,11 @@ import plotly.graph_objects as go
 import requests
 from pykrakenapi import KrakenAPI
 from algorithms.random_rambo import RandomRambo
+from algorithms.macd import Macd
 from ta import add_all_ta_features
 from ta.volatility import BollingerBands
-from ta.trend import macd
+from ta.trend import macd, macd_signal
+from ta.trend import  ema_indicator
 
 from Account import Account
 
@@ -56,13 +58,25 @@ def get_data(pair: str):
 	if not os.path.exists(DATA_FILENAME):
 		api = krakenex.API()
 		k = KrakenAPI(api)
-		ohlc, last = k.get_ohlc_data(pair, 240)
-		ohlc['dtime'] = pd.to_datetime(ohlc['time']).apply(lambda x: x.date())
+		data, last = k.get_ohlc_data(pair, 240)
+		data['dtime'] = pd.to_datetime(data['time']).apply(lambda x: x.date())
 		print(f'saving data to file: {DATA_FILENAME}')
-		ohlc.to_csv(DATA_FILENAME)
-	ohlc = pd.read_csv(DATA_FILENAME)
-	ohlc = ohlc.sort_values(by='dtime')
-	return ohlc
+		data.to_csv(DATA_FILENAME)
+	data = pd.read_csv(DATA_FILENAME)
+	data = data.sort_values(by='dtime')
+	# Add technical analysis features
+	data = add_all_ta_features(data, open='open', high='high', low='low', close='close', volume='volume', fillna=False)
+	# Bollinger bands
+	indicators_bb = BollingerBands(close=data['close'], window=20, window_dev=2)
+
+	data['bb_hb'] = indicators_bb.bollinger_hband()
+	data['bb_lb'] = indicators_bb.bollinger_lband()
+	data['macd'] = macd(data['close'])
+	data['macd_signal'] = macd_signal(data['close'])
+	data['200_ema'] = ema_indicator(data['close'], 200)
+
+	return data
+
 
 def add_line(figure, x0, x1, y0, y1, color, text):
 	figure.add_trace(go.Scatter(
@@ -78,39 +92,46 @@ def add_line(figure, x0, x1, y0, y1, color, text):
 		textposition="bottom center"
 	))
 
+
 def simulate(data, figure):
 	account = Account()
 	algo = RandomRambo()
 
-	for row in data.itertuples():
-		# Laat het algoritme een beslissing maken.
-		descision, ammount = algo.make_descision(data)
-		if descision == "buy":
-			account.buy('ETHUSDC', 1, row.close)
-			print(f'Buying 1 ETHUSDC for: {row.close}')
-			# add_line(figure, row.dtime, row.dtime, 0, row.close+500, 'green', 'B')
-		if descision == "sell":
-			account.sell('ETHUSDC', 1, row.close)
-			print(f'Selling 1 ETHUSDC for: {row.close}')
-			# add_line(figure, row.dtime, row.dtime, 0, row.close+500, 'red', 'S')
-		data.loc[row.Index, 'balance'] = account.get_balance(row.close)
-		data.loc[row.Index, 'coins'] = account.coins.get('ETHUSDC')
+	# Laat het algoritme een beslissing maken en zet dit in de dataframe.
+	data = algo.make_descision(data)
+	# data.action = ('buy', 1)
+	for row in data:
+		# action kan ook niks zijn.
+		if row.action:
+			if row.action[0] == 'buy':
+				account.buy('ETHUSDC', row.action[1], row.close)
+				print(f'Buying 1 ETHUSDC for: {row.close}')
+				# add_line(figure, row.dtime, row.dtime, 0, row.close+500, 'green', 'B')
+			if row.action[0] == "sell":
+				account.sell('ETHUSDC', row.action[1], row.close)
+				print(f'Selling 1 ETHUSDC for: {row.close}')
+				# add_line(figure, row.dtime, row.dtime, 0, row.close+500, 'red', 'S')
+			data.loc[row.Index, 'balance'] = account.get_balance(row.close)
+			data.loc[row.Index, 'coins'] = account.coins.get('ETHUSDC')
 	return data
 
 
 if __name__ == '__main__':
-	ohlc = get_data("ETHUSDC")
+	data = get_data("ETHUSDC")
 	fig = make_subplots(rows=3, cols=1)
 	fig.add_trace(
-		go.Candlestick(x=ohlc.dtime,
-			open=ohlc['open'],
-			high=ohlc['high'],
-			low=ohlc['low'],
-			close=ohlc['close']
+		go.Candlestick(x=data.dtime,
+					   open=data['open'],
+					   high=data['high'],
+					   low=data['low'],
+					   close=data['close']
 					   ),
 		row=1, col=1
 	)
-	data = simulate(ohlc, fig)
+
+
+
+	data = simulate(data, fig)
 	wallet_trace = {
 		'x': data.dtime,
 		'y': data.balance,
@@ -123,14 +144,6 @@ if __name__ == '__main__':
 		'name': 'account balans'
 	}
 
-	# Add technical analysis features
-	data = add_all_ta_features(data, open='open', high='high', low='low', close='close', volume='volume', fillna=False)
-	# Bollinger bands
-	indicators_bb = BollingerBands(close=data['close'], window=20, window_dev=2)
-
-	data['bb_hb'] = indicators_bb.bollinger_hband()
-	data['bb_lb'] = indicators_bb.bollinger_lband()
-
 	bb_hb_trace = {
 		'x': data.dtime,
 		'y': data.bb_hb,
@@ -140,7 +153,7 @@ if __name__ == '__main__':
 			'width': 1,
 			'color': 'blue'
 		},
-		'name': 'Bollinger band moving average'
+		'name': 'Bollinger high band'
 	}
 	bb_lb_trace = {
 		'x': data.dtime,
@@ -151,14 +164,24 @@ if __name__ == '__main__':
 			'width': 1,
 			'color': 'blue'
 		},
-		'name': 'Bollinger band moving average'
+		'name': 'Bollinger low band'
 	}
 
 
+	fig2 = go.Figure()
+	macd_trace = {
+		'y': data['macd'],
+		'x': data['dtime'],
+		'type': 'scatter',
+		'mode': 'lines',
+		'name': 'MACD'
+	}
+	fig2.add_trace(macd_trace)
 
 	# fig.update_layout(xaxis_rangeslider_visible=False)
 	fig.add_trace(wallet_trace, row=3, col=1)
 	fig.add_trace(bb_hb_trace, row=1, col=1)
 	fig.add_trace(bb_lb_trace, row=1, col=1)
 	fig.show()
+	fig2.show()
 	# balance_graph.show()
