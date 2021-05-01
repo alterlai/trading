@@ -4,8 +4,11 @@ class Account():
 		'ETHUSDC': 0
 	}
 
-	def get_balance(self):
-		return self.money
+	def get_balance(self, current_price):
+		total = self.money
+		for coin, ammount in self.coins.items():
+			total += ammount * current_price
+		return total
 
 	def buy(self, coin, ammount, close_price):
 		"""

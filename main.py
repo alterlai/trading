@@ -5,11 +5,12 @@ import random
 import krakenex
 import pandas as pd
 import plotly.express as px
-import plotly.subplots as subplots
+from plotly.subplots import make_subplots
 import plotly.graph_objects as go
 import requests
 from pykrakenapi import KrakenAPI
 from algorithms.random_rambo import RandomRambo
+from technical_indicators_lib import indicators
 
 from Account import Account
 
@@ -62,39 +63,81 @@ def get_data(pair: str):
 	return ohlc
 
 
-def simulate(data):
+def simulate(data, figure):
 	account = Account()
 	action_chance = 1 # Actie kans is 5%
-	balance = account.get_balance()
+	balance = account.get_balance(0)
 	algo = RandomRambo()
 
 	for row in data.itertuples():
 		# Laat het algoritme een beslissing maken.
 		descision, ammount = algo.make_descision(data)
 		if descision == "buy":
-			balance = account.buy('ETHUSDC', 1, row.close)
+			account.buy('ETHUSDC', 1, row.close)
+			figure.update_layout(
+				title="buy indicator",
+				shapes=[dict(x0=row.dtime, x1=row.dtime, y0=0, y1=1)]
+			)
 			print(f'Buying 1 ETHUSDC for: {row.close}')
 		if descision == "sell":
-			balance = account.sell('ETHUSDC', 1, row.close)
+			account.sell('ETHUSDC', 1, row.close)
 			print(f'Selling 1 ETHUSDC for: {row.close}')
 		else:
 			print("Doing nothing.")
-		data.loc[row.Index, 'balance'] = balance
+		data.loc[row.Index, 'balance'] = account.get_balance(row.close)
 		data.loc[row.Index, 'coins'] = account.coins.get('ETHUSDC')
 	return data
 
 
 if __name__ == '__main__':
 	ohlc = get_data("ETHUSDC")
-	fig = go.Figure(
-		data=[go.Candlestick(x=ohlc['dtime'],
-		open=ohlc['open'],
-		high=ohlc['high'],
-		low=ohlc['low'],
-		close=ohlc['close'])]
+	fig = make_subplots(rows=2, cols=2)
+	fig.add_trace(
+		go.Candlestick(x=ohlc.dtime,
+			open=ohlc['open'],
+			high=ohlc['high'],
+			low=ohlc['low'],
+			close=ohlc['close']
+					   ),
+		row=1, col=1
 	)
-	data = simulate(ohlc)
-	balance_data = data[['dtime', 'balance']].copy()
-	balance_graph = px.line(balance_data, x="dtime", y="balance", title="Balance graph")
+	market_trace = {
+		'x': ohlc.dtime,
+		'open': ohlc['open'],
+		'high': ohlc['high'],
+		'low': ohlc['low'],
+		'close': ohlc['close'],
+		'name': 'ETHUSDC',
+		'type': 'candlestick'
+	}
+	data = simulate(ohlc, fig)
+	wallet_trace = {
+		'x': data.dtime,
+		'y': data.balance,
+		'type': 'scatter',
+		'mode': 'lines',
+		'line' : {
+			'width': 1,
+			'color': 'blue'
+		},
+		'name': 'account balans'
+	}
+
+	macd = indicators.MACD()
+	data = macd.get_value_df(data)
+	macd_trace = {
+		'x': data.dtime,
+		'y': data.MACD,
+		'type': 'scatter',
+		'mode': 'lines',
+		'line': {
+			'width': 1,
+			'color': 'orange'
+		},
+		'name': 'MACD'
+	}
+	fig.update_layout(xaxis_rangeslider_visible=False)
+	fig.add_trace(wallet_trace, row=1, col=2)
+	fig.add_trace(macd_trace, row=2, col=1)
 	fig.show()
-	balance_graph.show()
+	# balance_graph.show()
