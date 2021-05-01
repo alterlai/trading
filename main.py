@@ -135,7 +135,8 @@ if __name__ == '__main__':
 			'color': 'orange'
 		},
 		'name': 'MACD'
-	}
+	}.
+	print('hello')
 	fig.update_layout(xaxis_rangeslider_visible=False)
 	fig.add_trace(wallet_trace, row=1, col=2)
 	fig.add_trace(macd_trace, row=2, col=1)
