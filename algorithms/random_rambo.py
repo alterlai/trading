@@ -8,7 +8,7 @@ class RandomRambo:
 	"""
 
 	def __init__(self):
-		self.action_chance = 5
+		self.action_chance = 1
 
 	def make_descision(self, data):
 		if random.randint(0, 100) <= self.action_chance:

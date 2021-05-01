@@ -1,8 +1,10 @@
 class Account():
-	money = 10000
-	coins = {
-		'ETHUSDC': 0
-	}
+
+	def __init__(self):
+		self.money = 10000
+		self.coins = {
+			'ETHUSDC': 0
+		}
 
 	def get_balance(self, current_price):
 		total = self.money

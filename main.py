@@ -10,7 +10,9 @@ import plotly.graph_objects as go
 import requests
 from pykrakenapi import KrakenAPI
 from algorithms.random_rambo import RandomRambo
-from technical_indicators_lib import indicators
+from ta import add_all_ta_features
+from ta.volatility import BollingerBands
+from ta.trend import macd
 
 from Account import Account
 
@@ -58,15 +60,26 @@ def get_data(pair: str):
 		ohlc['dtime'] = pd.to_datetime(ohlc['time']).apply(lambda x: x.date())
 		print(f'saving data to file: {DATA_FILENAME}')
 		ohlc.to_csv(DATA_FILENAME)
-	else:
-		ohlc = pd.read_csv(DATA_FILENAME)
+	ohlc = pd.read_csv(DATA_FILENAME)
+	ohlc = ohlc.sort_values(by='dtime')
 	return ohlc
 
+def add_line(figure, x0, x1, y0, y1, color, text):
+	figure.add_trace(go.Scatter(
+		x=[x0, x1],
+		y=[y0, y1],
+		mode="lines+text",
+		name="Lines and Text",
+		text=[f"{text}"],
+		line= {
+			'width': 1,
+			'color': f'{color}'
+		},
+		textposition="bottom center"
+	))
 
 def simulate(data, figure):
 	account = Account()
-	action_chance = 1 # Actie kans is 5%
-	balance = account.get_balance(0)
 	algo = RandomRambo()
 
 	for row in data.itertuples():
@@ -74,16 +87,12 @@ def simulate(data, figure):
 		descision, ammount = algo.make_descision(data)
 		if descision == "buy":
 			account.buy('ETHUSDC', 1, row.close)
-			figure.update_layout(
-				title="buy indicator",
-				shapes=[dict(x0=row.dtime, x1=row.dtime, y0=0, y1=1)]
-			)
 			print(f'Buying 1 ETHUSDC for: {row.close}')
+			# add_line(figure, row.dtime, row.dtime, 0, row.close+500, 'green', 'B')
 		if descision == "sell":
 			account.sell('ETHUSDC', 1, row.close)
 			print(f'Selling 1 ETHUSDC for: {row.close}')
-		else:
-			print("Doing nothing.")
+			# add_line(figure, row.dtime, row.dtime, 0, row.close+500, 'red', 'S')
 		data.loc[row.Index, 'balance'] = account.get_balance(row.close)
 		data.loc[row.Index, 'coins'] = account.coins.get('ETHUSDC')
 	return data
@@ -91,7 +100,7 @@ def simulate(data, figure):
 
 if __name__ == '__main__':
 	ohlc = get_data("ETHUSDC")
-	fig = make_subplots(rows=2, cols=2)
+	fig = make_subplots(rows=3, cols=1)
 	fig.add_trace(
 		go.Candlestick(x=ohlc.dtime,
 			open=ohlc['open'],
@@ -101,15 +110,6 @@ if __name__ == '__main__':
 					   ),
 		row=1, col=1
 	)
-	market_trace = {
-		'x': ohlc.dtime,
-		'open': ohlc['open'],
-		'high': ohlc['high'],
-		'low': ohlc['low'],
-		'close': ohlc['close'],
-		'name': 'ETHUSDC',
-		'type': 'candlestick'
-	}
 	data = simulate(ohlc, fig)
 	wallet_trace = {
 		'x': data.dtime,
@@ -123,22 +123,42 @@ if __name__ == '__main__':
 		'name': 'account balans'
 	}
 
-	macd = indicators.MACD()
-	data = macd.get_value_df(data)
-	macd_trace = {
+	# Add technical analysis features
+	data = add_all_ta_features(data, open='open', high='high', low='low', close='close', volume='volume', fillna=False)
+	# Bollinger bands
+	indicators_bb = BollingerBands(close=data['close'], window=20, window_dev=2)
+
+	data['bb_hb'] = indicators_bb.bollinger_hband()
+	data['bb_lb'] = indicators_bb.bollinger_lband()
+
+	bb_hb_trace = {
 		'x': data.dtime,
-		'y': data.MACD,
+		'y': data.bb_hb,
 		'type': 'scatter',
 		'mode': 'lines',
 		'line': {
 			'width': 1,
-			'color': 'orange'
+			'color': 'blue'
 		},
-		'name': 'MACD'
-	}.
-	print('hello')
-	fig.update_layout(xaxis_rangeslider_visible=False)
-	fig.add_trace(wallet_trace, row=1, col=2)
-	fig.add_trace(macd_trace, row=2, col=1)
+		'name': 'Bollinger band moving average'
+	}
+	bb_lb_trace = {
+		'x': data.dtime,
+		'y': data.bb_lb,
+		'type': 'scatter',
+		'mode': 'lines',
+		'line': {
+			'width': 1,
+			'color': 'blue'
+		},
+		'name': 'Bollinger band moving average'
+	}
+
+
+
+	# fig.update_layout(xaxis_rangeslider_visible=False)
+	fig.add_trace(wallet_trace, row=3, col=1)
+	fig.add_trace(bb_hb_trace, row=1, col=1)
+	fig.add_trace(bb_lb_trace, row=1, col=1)
 	fig.show()
 	# balance_graph.show()
