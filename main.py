@@ -1,22 +1,20 @@
 import json
 import os
-import random
 
 import krakenex
 import pandas as pd
-import plotly.express as px
-from plotly.subplots import make_subplots
 import plotly.graph_objects as go
 import requests
+from plotly.subplots import make_subplots
 from pykrakenapi import KrakenAPI
-from algorithms.random_rambo import RandomRambo
-from algorithms.macd import Macd
 from ta import add_all_ta_features
-from ta.volatility import BollingerBands
+from ta.trend import ema_indicator
 from ta.trend import macd, macd_signal
-from ta.trend import  ema_indicator
+from ta.volatility import BollingerBands
 
 from Account import Account
+from algorithms.random_rambo import RandomRambo
+from algorithms.high_macd import HighMACD
 
 BASE_URL = "https://api.kraken.com/0/public/"
 HEADERS = {
@@ -64,6 +62,8 @@ def get_data(pair: str):
 		data.to_csv(DATA_FILENAME)
 	data = pd.read_csv(DATA_FILENAME)
 	data = data.sort_values(by='dtime')
+	data.reset_index(inplace=True)
+	data.drop('index', axis=1, inplace=True)
 	# Add technical analysis features
 	data = add_all_ta_features(data, open='open', high='high', low='low', close='close', volume='volume', fillna=False)
 	# Bollinger bands
@@ -95,24 +95,26 @@ def add_line(figure, x0, x1, y0, y1, color, text):
 
 def simulate(data, figure):
 	account = Account()
-	algo = RandomRambo()
+	algo = HighMACD()
 
-	# Laat het algoritme een beslissing maken en zet dit in de dataframe.
-	data = algo.make_descision(data)
-	# data.action = ('buy', 1)
-	for row in data:
+	for row in data.itertuples():
+		# Loop over alle data en geef deze aan het algoritme incl. historische data tot op dat punt.
+		current_data = data[0:row.Index + 1] # Index + 1, zodat we de eerste rij pakken
+		descision = algo.make_descision(current_data)
 		# action kan ook niks zijn.
-		if row.action:
-			if row.action[0] == 'buy':
-				account.buy('ETHUSDC', row.action[1], row.close)
+		if descision:
+			if descision[0] == 'buy':
+				data.loc[row.Index, 'action'] = ('buy')
+				account.buy('ETHUSDC', 1, row.close)
 				print(f'Buying 1 ETHUSDC for: {row.close}')
 				# add_line(figure, row.dtime, row.dtime, 0, row.close+500, 'green', 'B')
-			if row.action[0] == "sell":
-				account.sell('ETHUSDC', row.action[1], row.close)
+			if descision[0] == "sell":
+				data.loc[row.Index, 'action'] = ('sell')
+				account.sell('ETHUSDC', 1, row.close)
 				print(f'Selling 1 ETHUSDC for: {row.close}')
 				# add_line(figure, row.dtime, row.dtime, 0, row.close+500, 'red', 'S')
-			data.loc[row.Index, 'balance'] = account.get_balance(row.close)
-			data.loc[row.Index, 'coins'] = account.coins.get('ETHUSDC')
+		data.loc[row.Index, 'balance'] = account.get_balance(row.close)
+		data.loc[row.Index, 'coins'] = account.coins.get('ETHUSDC')
 	return data
 
 
