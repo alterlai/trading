@@ -2,15 +2,20 @@ class Account():
 
 	def __init__(self):
 		self.money = 10000
+		self.initial_balance = self.money
 		self.coins = {
 			'ETHUSDC': 0
 		}
+		self.capital_risk = 0.03
 
 	def get_balance(self, current_price):
 		total = self.money
 		for coin, ammount in self.coins.items():
 			total += ammount * current_price
 		return total
+
+	def get_tp1_value(self):
+		return self.initial_balance * self.capital_risk
 
 	def buy(self, coin, ammount, close_price):
 		"""
